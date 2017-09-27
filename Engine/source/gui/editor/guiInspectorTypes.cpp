@@ -400,6 +400,32 @@ ConsoleDocClass( GuiInspectorTypeCheckBox,
 
 GuiControl* GuiInspectorTypeCheckBox::constructEditControl()
 {
+   if ( mField->flag.test(AbstractClassRep::FieldFlags::FIELD_ComponentInspectors) )
+   {
+      // This checkbox (bool field) is meant to be treated as a button.
+      GuiControl* retCtrl = new GuiButtonCtrl();
+
+      // If we couldn't construct the control, bail!
+      if( retCtrl == NULL )
+         return retCtrl;
+
+      GuiButtonCtrl *button = dynamic_cast<GuiButtonCtrl*>(retCtrl);
+
+      // Let's make it look pretty.
+      retCtrl->setDataField( StringTable->insert("profile"), NULL, "InspectorTypeButtonProfile" );
+      retCtrl->setField( "text", "Click Here" );
+
+      retCtrl->setScriptValue( getData() );
+
+      _registerEditControl( retCtrl );
+
+      // Configure it to update our value when the popup is closed
+      char szBuffer[512];
+      dSprintf( szBuffer, 512, "%d.apply(%d.getValue());",getId(), button->getId() );
+      button->setField("Command", szBuffer );
+
+      return retCtrl;
+   } else {
    GuiControl* retCtrl = new GuiCheckBoxCtrl();
 
    GuiCheckBoxCtrl *check = dynamic_cast<GuiCheckBoxCtrl*>(retCtrl);
@@ -420,6 +446,7 @@ GuiControl* GuiInspectorTypeCheckBox::constructEditControl()
    check->setField("Command", szBuffer );
 
    return retCtrl;
+   }
 }
 
 
@@ -635,7 +662,7 @@ bool GuiInspectorTypeImageFileName::renderTooltip( const Point2I &hoverPos, cons
    if ( !filename || !filename[0] )
       return false;
 
-   GFXTexHandle texture( filename, &GFXDefaultStaticDiffuseProfile, avar("%s() - tooltip texture (line %d)", __FUNCTION__, __LINE__) );
+   GFXTexHandle texture( filename, &GFXStaticTextureSRGBProfile, avar("%s() - tooltip texture (line %d)", __FUNCTION__, __LINE__) );
    if ( texture.isNull() )
       return false;
 
@@ -1031,7 +1058,7 @@ bool GuiInspectorTypeEaseF::updateRects()
 }
 
 //-----------------------------------------------------------------------------
-// GuiInspectorTypeColor (Base for ColorI/ColorF) 
+// GuiInspectorTypeColor (Base for ColorI/LinearColorF) 
 //-----------------------------------------------------------------------------
 GuiInspectorTypeColor::GuiInspectorTypeColor()
  : mBrowseButton( NULL )
@@ -1182,7 +1209,7 @@ void GuiInspectorTypeColorI::setValue( StringTableEntry newValue )
 IMPLEMENT_CONOBJECT(GuiInspectorTypeColorF);
 
 ConsoleDocClass( GuiInspectorTypeColorF,
-   "@brief Inspector field type for ColorF\n\n"
+   "@brief Inspector field type for LinearColorF\n\n"
    "Editor use only.\n\n"
    "@internal"
 );
@@ -1207,7 +1234,7 @@ void GuiInspectorTypeColorF::setValue( StringTableEntry newValue )
    // Now we also set our color swatch button to the new color value.
    if ( mBrowseButton )
    {      
-      ColorF color(1,0,1,1);
+      LinearColorF color(1,0,1,1);
       dSscanf( newValue, "%f %f %f %f", &color.red, &color.green, &color.blue, &color.alpha );
       mBrowseButton->setColor( color );
    }
@@ -1263,9 +1290,9 @@ void GuiInspectorTypeS32::setValue( StringTableEntry newValue )
 //-----------------------------------------------------------------------------
 
 GuiInspectorTypeBitMask32::GuiInspectorTypeBitMask32()
- : mRollout( NULL ),
-   mArrayCtrl( NULL ),
-   mHelper( NULL )
+ : mHelper( NULL ),
+   mRollout( NULL ),
+   mArrayCtrl( NULL )
 {
 }
 

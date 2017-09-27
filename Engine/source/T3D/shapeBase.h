@@ -390,7 +390,7 @@ struct ShapeBaseImageData: public GameBaseData {
    S32         lightType;           ///< Indicates the type of the light.
                                     ///
                                     ///  One of: ConstantLight, PulsingLight, WeaponFireLight.
-   ColorF      lightColor;
+   LinearColorF      lightColor;
    S32         lightDuration;       ///< The duration in SimTime of Pulsing or WeaponFire type lights.
    F32         lightRadius;         ///< Extent of light.
    F32         lightBrightness;     ///< Brightness of the light ( if it is WeaponFireLight ).
@@ -491,8 +491,8 @@ struct ShapeBaseImageData: public GameBaseData {
 
    /// @name Callbacks
    /// @{
-   DECLARE_CALLBACK( void, onMount, ( ShapeBase* obj, S32 slot, F32 dt ) );
-   DECLARE_CALLBACK( void, onUnmount, ( ShapeBase* obj, S32 slot, F32 dt ) );
+   DECLARE_CALLBACK( void, onMount, ( SceneObject* obj, S32 slot, F32 dt ) );
+   DECLARE_CALLBACK( void, onUnmount, ( SceneObject* obj, S32 slot, F32 dt ) );
    /// @}
 };
 

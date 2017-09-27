@@ -39,6 +39,7 @@
 #include "console/engineStructs.h"
 #endif
 
+template<typename T> inline const T nullAsType(){ return nullptr; }
 
 /// @file
 /// Legacy TS-based console type definitions.
@@ -46,6 +47,13 @@
 
 /// @ingroup console_system Console System
 /// @{
+
+#if _MSC_VER >= 1911
+   #ifdef offsetof
+      #undef offsetof
+   #endif // offsetof
+   #define offsetof(s,m) ((size_t)&reinterpret_cast<char const volatile&>((((s*)0)->m)))
+#endif
 
 #ifndef Offset
 #define Offset(x, cls) offsetof(cls, x)
@@ -121,7 +129,7 @@ DefineConsoleType( TypeParticleParameterString, const char * )
 
 DefineConsoleType( TypeFlag, S32 )
 DefineConsoleType( TypeColorI, ColorI )
-DefineConsoleType( TypeColorF, ColorF )
+DefineConsoleType( TypeColorF, LinearColorF )
 DefineConsoleType( TypeSimObjectName, SimObject* )
 DefineConsoleType( TypeShader, GFXShader * )
 

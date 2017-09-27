@@ -176,27 +176,26 @@ ImplementEnumType(baseTexFormat,
 { TerrainBlock::NONE, "NONE", "No cached terrain.\n" },
 { TerrainBlock::DDS, "DDS", "Cache the terrain in a DDS format.\n" },
 { TerrainBlock::PNG, "PNG", "Cache the terrain in a PNG format.\n" },
-{ TerrainBlock::JPG, "JPG", "Cache the terrain in a JPG format.\n" },
 EndImplementEnumType;
 
 TerrainBlock::TerrainBlock()
- : mSquareSize( 1.0f ),
-   mCastShadows( true ),
-   mScreenError( 16 ),   
-   mDetailsDirty( false ),
-   mLayerTexDirty( false ),
-   mLightMap( NULL ),
+ : mLightMap( NULL ),
    mLightMapSize( 256 ),
-   mMaxDetailDistance( 0.0f ),
-   mCell( NULL ),
    mCRC( 0 ),
-   mBaseTexSize( 1024 ),
-   mBaseTexFormat( TerrainBlock::JPG ),
-   mBaseMaterial( NULL ),
-   mDefaultMatInst( NULL ),
+   mMaxDetailDistance( 0.0f ),
    mBaseTexScaleConst( NULL ),
    mBaseTexIdConst( NULL ),
+   mDetailsDirty( false ),
+   mLayerTexDirty( false ),
+   mBaseTexSize( 1024 ),
+   mBaseTexFormat( TerrainBlock::DDS ),
+   mCell( NULL ),
+   mBaseMaterial( NULL ),
+   mDefaultMatInst( NULL ),
+   mSquareSize( 1.0f ),
    mPhysicsRep( NULL ),
+   mScreenError( 16 ),
+   mCastShadows( true ),
    mZoningDirty( false )
 {
    mTypeMask = TerrainObjectType | StaticObjectType | StaticShapeObjectType;
@@ -873,7 +872,7 @@ GFXTextureObject* TerrainBlock::getLightMapTex()
    if ( mLightMapTex.isNull() && mLightMap )
    {
       mLightMapTex.set( mLightMap, 
-                        &GFXDefaultStaticDiffuseProfile, 
+                        &GFXStaticTextureProfile, 
                         false, 
                         "TerrainBlock::getLightMapTex()" );
    }
@@ -966,7 +965,7 @@ bool TerrainBlock::onAdd()
          _updateBaseTexture( true );
 
       // The base texture should have been cached by now... so load it.
-      mBaseTex.set( baseCachePath, &GFXDefaultStaticDiffuseProfile, "TerrainBlock::mBaseTex" );
+      mBaseTex.set( baseCachePath, &GFXStaticTextureSRGBProfile, "TerrainBlock::mBaseTex" );
 
       GFXTextureManager::addEventDelegate( this, &TerrainBlock::_onTextureEvent );
       MATMGR->getFlushSignal().notify( this, &TerrainBlock::_onFlushMaterials );

@@ -168,7 +168,7 @@ void Sun::initPersistFields()
          "Enables/disables shadows cast by objects due to Sun light");    
 
       addField("staticRefreshFreq", TypeS32, Offset(mStaticRefreshFreq, Sun), "static shadow refresh rate (milliseconds)");
-      addField("dynamicRefreshFreq", TypeS32, Offset(mDynamicRefreshFreq, Sun), "dynamic shadow refresh rate (milliseconds)");
+      addField("dynamicRefreshFreq", TypeS32, Offset(mDynamicRefreshFreq, Sun), "dynamic shadow refresh rate (milliseconds)", AbstractClassRep::FieldFlags::FIELD_HideInInspectors);
 
    endGroup( "Lighting" );
 
@@ -394,7 +394,7 @@ void Sun::setElevation( F32 elevation )
    setMaskBits( UpdateMask ); // TODO: Break out the masks to save some space!
 }
 
-void Sun::setColor( const ColorF &color )
+void Sun::setColor( const LinearColorF &color )
 {
    mLightColor = color;
    _conformLights();
@@ -490,7 +490,7 @@ void Sun::_renderCorona( ObjectRenderInst *ri, SceneRenderState *state, BaseMatI
       points[i] += mLightWorldPos;
    }
 
-   ColorF vertColor;
+   LinearColorF vertColor;
    if ( mCoronaUseLightColor )
       vertColor = mLightColor;
    else
@@ -503,7 +503,7 @@ void Sun::_renderCorona( ObjectRenderInst *ri, SceneRenderState *state, BaseMatI
 
    for ( S32 i = 0; i < 4; i++ )
    {
-      pVert->color.set( vertColor );
+      pVert->color.set( vertColor.toColorI());
       pVert->point.set( points[i] );
       pVert->texCoord.set( sCoords[i].x, sCoords[i].y );
       pVert++;

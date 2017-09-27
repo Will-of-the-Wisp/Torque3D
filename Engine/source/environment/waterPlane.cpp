@@ -533,7 +533,7 @@ void WaterPlane::setupVBIB( SceneRenderState *state )
       1,             // Top
       -(S32)gridStride,   // Right
       -1,             // Bottom
-      gridStride,    // Left
+      (S32)gridStride,    // Left
    };
 
    const U32 firstBorderVert = gridStride * gridSize + gridStride;
@@ -664,7 +664,7 @@ void WaterPlane::setShaderParams( SceneRenderState *state, BaseMatInstance* mat,
    // set pixel shader constants
    //-----------------------------------
 
-   ColorF c( mWaterFogData.color );
+   LinearColorF c( mWaterFogData.color );
    matParams->setSafe( paramHandles.mBaseColorSC, c );   
    
    // By default we need to show a true reflection is fullReflect is enabled and

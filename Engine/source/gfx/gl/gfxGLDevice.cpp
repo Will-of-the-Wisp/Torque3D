@@ -46,6 +46,7 @@
 #include "gfx/gl/gfxGLStateCache.h"
 #include "gfx/gl/gfxGLVertexAttribLocation.h"
 #include "gfx/gl/gfxGLVertexDecl.h"
+#include "shaderGen/shaderGen.h"
 
 GFXAdapter::CreateDeviceInstanceDelegate GFXGLDevice::mCreateDeviceInstance(GFXGLDevice::createInstance); 
 
@@ -84,6 +85,10 @@ void loadGLExtensions(void *context)
 void STDCALL glDebugCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, 
 	const GLchar *message, const void *userParam)
 {
+    // JTH [11/24/2016]: This is a temporary fix so that we do not get spammed for redundant fbo changes.
+    // This only happens on Intel cards. This should be looked into sometime in the near future.
+    if (dStrStartsWith(message, "API_ID_REDUNDANT_FBO"))
+        return;
     if (severity == GL_DEBUG_SEVERITY_HIGH)
         Con::errorf("OPENGL: %s", message);
     else if (severity == GL_DEBUG_SEVERITY_MEDIUM)
@@ -103,27 +108,6 @@ void STDCALL glAmdDebugCallback(GLuint id, GLenum category, GLenum severity, GLs
         Con::printf("AMDOPENGL: %s", message);
 }
 
-
-// >>>> OPENGL INTEL WORKAROUND @todo OPENGL INTEL remove
-PFNGLBINDFRAMEBUFFERPROC __openglBindFramebuffer = NULL;
-
-void STDCALL _t3d_glBindFramebuffer(GLenum target, GLuint framebuffer)
-{
-    if( target == GL_FRAMEBUFFER )
-    {
-        if( GFXGL->getOpenglCache()->getCacheBinded( GL_DRAW_FRAMEBUFFER ) == framebuffer
-            && GFXGL->getOpenglCache()->getCacheBinded( GL_READ_FRAMEBUFFER ) == framebuffer )
-            return;
-    }
-    else if( GFXGL->getOpenglCache()->getCacheBinded( target ) == framebuffer )
-        return;
-
-    __openglBindFramebuffer(target, framebuffer);
-    GFXGL->getOpenglCache()->setCacheBinded( target, framebuffer);
-}
-// <<<< OPENGL INTEL WORKAROUND
-
-
 void GFXGLDevice::initGLState()
 {  
    // We don't currently need to sync device state with a known good place because we are
@@ -134,7 +118,8 @@ void GFXGLDevice::initGLState()
    mCardProfiler = new GFXGLCardProfiler();
    mCardProfiler->init(); 
    glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, (GLint*)&mMaxShaderTextures);
-   glGetIntegerv(GL_MAX_TEXTURE_UNITS, (GLint*)&mMaxFFTextures);
+   // JTH: Needs removed, ffp
+   //glGetIntegerv(GL_MAX_TEXTURE_UNITS, (GLint*)&mMaxFFTextures);
    glGetIntegerv(GL_MAX_COLOR_ATTACHMENTS, (GLint*)&mMaxTRColors);
    mMaxTRColors = getMin( mMaxTRColors, (U32)(GFXTextureTarget::MaxRenderSlotId-1) );
    
@@ -156,14 +141,11 @@ void GFXGLDevice::initGLState()
    String vendorStr = (const char*)glGetString( GL_VENDOR );
    if( vendorStr.find("NVIDIA", 0, String::NoCase | String::Left) != String::NPos)
       mUseGlMap = false;
-
-
-   if( vendorStr.find("INTEL", 0, String::NoCase | String::Left ) != String::NPos)
-   {
-      // @todo OPENGL INTEL - This is a workaround for a warning spam or even crashes with actual framebuffer code, remove when implemented TGL layer.
-      __openglBindFramebuffer = glBindFramebuffer;
-      glBindFramebuffer = &_t3d_glBindFramebuffer;
-   }
+   
+   // Workaround for all Mac's, has a problem using glMap* with volatile buffers
+#ifdef TORQUE_OS_MAC
+   mUseGlMap = false;
+#endif
 
 #if TORQUE_DEBUG
    if( gglHasExtension(ARB_debug_output) )
@@ -191,16 +173,30 @@ void GFXGLDevice::initGLState()
 
    PlatformGL::setVSync(smDisableVSync ? 0 : 1);
 
+   //install vsync callback
+   Con::NotifyDelegate clbk(this, &GFXGLDevice::vsyncCallback);
+   Con::addVariableNotify("$pref::Video::disableVerticalSync", clbk);
+
    //OpenGL 3 need a binded VAO for render
    GLuint vao;
    glGenVertexArrays(1, &vao);
    glBindVertexArray(vao);
+
+   //enable sRGB
+   glEnable(GL_FRAMEBUFFER_SRGB);
+}
+
+void GFXGLDevice::vsyncCallback()
+{
+   PlatformGL::setVSync(smDisableVSync ? 0 : 1);
 }
 
 GFXGLDevice::GFXGLDevice(U32 adapterIndex) :
    mAdapterIndex(adapterIndex),
+   mNeedUpdateVertexAttrib(false),
    mCurrentPB(NULL),
    mDrawInstancesCount(0),
+   mCurrentShader( NULL ),
    m_mCurrentWorld(true),
    m_mCurrentView(true),
    mContext(NULL),
@@ -210,8 +206,6 @@ GFXGLDevice::GFXGLDevice(U32 adapterIndex) :
    mMaxFFTextures(2),
    mMaxTRColors(1),
    mClip(0, 0, 0, 0),
-   mCurrentShader( NULL ),
-   mNeedUpdateVertexAttrib(false),
    mWindowRT(NULL),
    mUseGlMap(true)
 {
@@ -460,7 +454,7 @@ void GFXGLDevice::endSceneInternal()
    mCanCurrentlyRender = false;
 }
 
-void GFXGLDevice::clear(U32 flags, ColorI color, F32 z, U32 stencil)
+void GFXGLDevice::clear(U32 flags, const LinearColorF& color, F32 z, U32 stencil)
 {
    // Make sure we have flushed our render target state.
    _updateRenderTargets();
@@ -480,10 +474,7 @@ void GFXGLDevice::clear(U32 flags, ColorI color, F32 z, U32 stencil)
    glColorMask(true, true, true, true);
    glDepthMask(true);
    glStencilMask(0xFFFFFFFF);
-   
-
-   ColorF c = color;   
-   glClearColor(c.red, c.green, c.blue, c.alpha);
+   glClearColor(color.red, color.green, color.blue, color.alpha);
    glClearDepth(z);
    glClearStencil(stencil);
 
@@ -591,7 +582,8 @@ void GFXGLDevice::drawPrimitive( GFXPrimitiveType primType, U32 vertexStart, U32
 {
    preDrawPrimitive();
   
-   vertexStart += mCurrentVB[0]->mBufferVertexOffset;
+   if(mCurrentVB[0])
+      vertexStart += mCurrentVB[0]->mBufferVertexOffset;
 
    if(mDrawInstancesCount)
       glDrawArraysInstanced(GFXGLPrimType[primType], vertexStart, primCountToIndexCount(primType, primitiveCount), mDrawInstancesCount);
@@ -639,9 +631,9 @@ void GFXGLDevice::setLightMaterialInternal(const GFXLightMaterial mat)
    // ONLY NEEDED ON FFP
 }
 
-void GFXGLDevice::setGlobalAmbientInternal(ColorF color)
+void GFXGLDevice::setGlobalAmbientInternal(LinearColorF color)
 {
-   glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (GLfloat*)&color);
+   // ONLY NEEDED ON FFP
 }
 
 void GFXGLDevice::setTextureInternal(U32 textureUnit, const GFXTextureObject*texture)
@@ -697,12 +689,12 @@ void GFXGLDevice::setClipRect( const RectI &inRect )
    const F32 right = mClip.point.x + mClip.extent.x;
    const F32 bottom = mClip.extent.y;
    const F32 top = 0.0f;
-   const F32 near = 0.0f;
-   const F32 far = 1.0f;
+   const F32 nearPlane = 0.0f;
+   const F32 farPlane = 1.0f;
    
    const F32 tx = -(right + left)/(right - left);
    const F32 ty = -(top + bottom)/(top - bottom);
-   const F32 tz = -(far + near)/(far - near);
+   const F32 tz = -(farPlane + nearPlane)/(farPlane - nearPlane);
    
    static Point4F pt;
    pt.set(2.0f / (right - left), 0.0f, 0.0f, 0.0f);
@@ -711,7 +703,7 @@ void GFXGLDevice::setClipRect( const RectI &inRect )
    pt.set(0.0f, 2.0f/(top - bottom), 0.0f, 0.0f);
    mProjectionMatrix.setColumn(1, pt);
    
-   pt.set(0.0f, 0.0f, -2.0f/(far - near), 0.0f);
+   pt.set(0.0f, 0.0f, -2.0f/(farPlane - nearPlane), 0.0f);
    mProjectionMatrix.setColumn(2, pt);
    
    pt.set(tx, ty, tz, 1.0f);
@@ -790,8 +782,8 @@ void GFXGLDevice::setupGenericShaders( GenericShaderType type )
       ShaderData *shaderData;
 
       shaderData = new ShaderData();
-      shaderData->setField("OGLVertexShaderFile", "shaders/common/fixedFunction/gl/colorV.glsl");
-      shaderData->setField("OGLPixelShaderFile", "shaders/common/fixedFunction/gl/colorP.glsl");
+      shaderData->setField("OGLVertexShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/gl/colorV.glsl"));
+      shaderData->setField("OGLPixelShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/gl/colorP.glsl"));
       shaderData->setField("pixVersion", "2.0");
       shaderData->registerObject();
       mGenericShader[GSColor] =  shaderData->getShader();
@@ -800,8 +792,8 @@ void GFXGLDevice::setupGenericShaders( GenericShaderType type )
       Sim::getRootGroup()->addObject(shaderData);
 
       shaderData = new ShaderData();
-      shaderData->setField("OGLVertexShaderFile", "shaders/common/fixedFunction/gl/modColorTextureV.glsl");
-      shaderData->setField("OGLPixelShaderFile", "shaders/common/fixedFunction/gl/modColorTextureP.glsl");
+      shaderData->setField("OGLVertexShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/gl/modColorTextureV.glsl"));
+      shaderData->setField("OGLPixelShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/gl/modColorTextureP.glsl"));
       shaderData->setSamplerName("$diffuseMap", 0);
       shaderData->setField("pixVersion", "2.0");
       shaderData->registerObject();
@@ -811,8 +803,8 @@ void GFXGLDevice::setupGenericShaders( GenericShaderType type )
       Sim::getRootGroup()->addObject(shaderData);
 
       shaderData = new ShaderData();
-      shaderData->setField("OGLVertexShaderFile", "shaders/common/fixedFunction/gl/addColorTextureV.glsl");
-      shaderData->setField("OGLPixelShaderFile", "shaders/common/fixedFunction/gl/addColorTextureP.glsl");
+      shaderData->setField("OGLVertexShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/gl/addColorTextureV.glsl"));
+      shaderData->setField("OGLPixelShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/gl/addColorTextureP.glsl"));
       shaderData->setSamplerName("$diffuseMap", 0);
       shaderData->setField("pixVersion", "2.0");
       shaderData->registerObject();
@@ -822,8 +814,8 @@ void GFXGLDevice::setupGenericShaders( GenericShaderType type )
       Sim::getRootGroup()->addObject(shaderData);
 
       shaderData = new ShaderData();
-      shaderData->setField("OGLVertexShaderFile", "shaders/common/fixedFunction/gl/textureV.glsl");
-      shaderData->setField("OGLPixelShaderFile", "shaders/common/fixedFunction/gl/textureP.glsl");
+      shaderData->setField("OGLVertexShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/gl/textureV.glsl"));
+      shaderData->setField("OGLPixelShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/gl/textureP.glsl"));
       shaderData->setSamplerName("$diffuseMap", 0);
       shaderData->setField("pixVersion", "2.0");
       shaderData->registerObject();

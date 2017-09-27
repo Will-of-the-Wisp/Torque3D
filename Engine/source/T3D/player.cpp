@@ -109,8 +109,6 @@ static S32 sMaxPredictionTicks = 30;   // Number of ticks to predict
 
 S32 Player::smExtendedMoveHeadPosRotIndex = 0;  // The ExtendedMove position/rotation index used for head movements
 
-// Anchor point compression
-const F32 sAnchorMaxDistance = 32.0f;
 
 //
 static U32 sCollisionMoveMask =  TerrainObjectType       |
@@ -259,15 +257,15 @@ PlayerData::PlayerData()
    firstPersonShadows = false;
 
    // Used for third person image rendering
-   imageAnimPrefix = StringTable->insert("");
+   imageAnimPrefix = StringTable->EmptyString();
 
    allowImageStateAnimation = false;
 
    // Used for first person image rendering
-   imageAnimPrefixFP = StringTable->insert("");
+   imageAnimPrefixFP = StringTable->EmptyString();
    for (U32 i=0; i<ShapeBase::MaxMountedImages; ++i)
    {
-      shapeNameFP[i] = StringTable->insert("");
+      shapeNameFP[i] = StringTable->EmptyString();
       mCRCFP[i] = 0;
       mValidShapeFP[i] = false;
    }
@@ -420,7 +418,7 @@ PlayerData::PlayerData()
 
    jumpTowardsNormal = true;
 
-   physicsPlayerType = StringTable->insert("");
+   physicsPlayerType = StringTable->EmptyString();
 
    dMemset( actionList, 0, sizeof(actionList) );
 }
@@ -3835,11 +3833,13 @@ void Player::updateActionThread()
    // Select an action animation sequence, this assumes that
    // this function is called once per tick.
    if(mActionAnimation.action != PlayerData::NullAnimation)
+   {
       if (mActionAnimation.forward)
          mActionAnimation.atEnd = mShapeInstance->getPos(mActionAnimation.thread) == 1;
       else
          mActionAnimation.atEnd = mShapeInstance->getPos(mActionAnimation.thread) == 0;
-
+   }
+    
    // Only need to deal with triggers on the client
    if( isGhost() )
    {
@@ -3893,7 +3893,7 @@ void Player::updateActionThread()
                ParticleEmitter * emitter = new ParticleEmitter;
                emitter->onNewDataBlock( mDataBlock->footPuffEmitter, false );
 
-               ColorF colorList[ ParticleData::PDC_NUM_KEYS];
+               LinearColorF colorList[ ParticleData::PDC_NUM_KEYS];
 
                for( U32 x = 0; x < getMin( Material::NUM_EFFECT_COLOR_STAGES, ParticleData::PDC_NUM_KEYS ); ++ x )
                   colorList[ x ].set( material->mEffectColor[ x ].red,
@@ -3930,9 +3930,9 @@ void Player::updateActionThread()
    if (mMountPending)
       mMountPending = (isMounted() ? 0 : (mMountPending - 1));
 
-   if (mActionAnimation.action == PlayerData::NullAnimation ||
-       ((!mActionAnimation.waitForEnd || mActionAnimation.atEnd)) &&
-       !mActionAnimation.holdAtEnd && (mActionAnimation.delayTicks -= !mMountPending) <= 0)
+   if ((mActionAnimation.action == PlayerData::NullAnimation) ||
+       ((!mActionAnimation.waitForEnd || mActionAnimation.atEnd) &&
+       (!mActionAnimation.holdAtEnd && (mActionAnimation.delayTicks -= !mMountPending) <= 0)))
    {
       //The scripting language will get a call back when a script animation has finished...
       //  example: When the chat menu animations are done playing...
@@ -4514,7 +4514,7 @@ void Player::onImageAnimThreadUpdate(U32 imageSlot, S32 imageShapeIndex, F32 dt)
    }
 }
 
-void Player::onUnmount( ShapeBase *obj, S32 node )
+void Player::onUnmount( SceneObject *obj, S32 node )
 {
    // Reset back to root position during dismount.
    setActionThread(PlayerData::RootAnim,true,false,false);
@@ -4581,6 +4581,7 @@ void Player::updateAnimationTree(bool firstPerson)
 {
    S32 mode = 0;
    if (firstPerson)
+   {
       if (mActionAnimation.firstPerson)
          mode = 0;
 //            TSShapeInstance::MaskNodeRotation;
@@ -4588,7 +4589,7 @@ void Player::updateAnimationTree(bool firstPerson)
 //            TSShapeInstance::MaskNodePosY;
       else
          mode = TSShapeInstance::MaskNodeAllButBlend;
-
+   }
    for (U32 i = 0; i < PlayerData::NumSpineNodes; i++)
       if (mDataBlock->spineNode[i] != -1)
          mShapeInstance->setNodeAnimationState(mDataBlock->spineNode[i],mode);
@@ -6651,7 +6652,7 @@ DefineEngineMethod( Player, setActionThread, bool, ( const char* name, bool hold
    "@tsexample\n"
       "// Place the player in a sitting position after being mounted\n"
       "%player.setActionThread( \"sitting\", true, true );\n"
-	"@endtsexample\n")
+   "@endtsexample\n")
 {
    return object->setActionThread( name, hold, true, fsp);
 }
@@ -6699,11 +6700,11 @@ DefineEngineMethod( Player, clearControlObject, void, (),,
    "Returns control to the player. This internally calls "
    "Player::setControlObject(0).\n"
    "@tsexample\n"
-		"%player.clearControlObject();\n"
+      "%player.clearControlObject();\n"
       "echo(%player.getControlObject()); //<-- Returns 0, player assumes control\n"
       "%player.setControlObject(%vehicle);\n"
       "echo(%player.getControlObject()); //<-- Returns %vehicle, player controls the vehicle now.\n"
-	"@endtsexample\n"
+   "@endtsexample\n"
    "@note If the player does not have a control object, the player will receive all moves "
    "from its GameConnection.  If you're looking to remove control from the player itself "
    "(i.e. stop sending moves to the player) use GameConnection::setControlObject() to transfer "
@@ -6761,63 +6762,63 @@ void Player::consoleInit()
       "@brief Determines if the player is rendered or not.\n\n"
       "Used on the client side to disable the rendering of all Player objects.  This is "
       "mainly for the tools or debugging.\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
    Con::addVariable("$player::renderMyItems",TypeBool, &sRenderMyItems,
       "@brief Determines if mounted shapes are rendered or not.\n\n"
       "Used on the client side to disable the rendering of all Player mounted objects.  This is "
       "mainly used for the tools or debugging.\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
    Con::addVariable("$player::renderCollision", TypeBool, &sRenderPlayerCollision, 
       "@brief Determines if the player's collision mesh should be rendered.\n\n"
       "This is mainly used for the tools and debugging.\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
 
    Con::addVariable("$player::minWarpTicks",TypeF32,&sMinWarpTicks, 
       "@brief Fraction of tick at which instant warp occures on the client.\n\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
    Con::addVariable("$player::maxWarpTicks",TypeS32,&sMaxWarpTicks, 
       "@brief When a warp needs to occur due to the client being too far off from the server, this is the "
       "maximum number of ticks we'll allow the client to warp to catch up.\n\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
    Con::addVariable("$player::maxPredictionTicks",TypeS32,&sMaxPredictionTicks, 
       "@brief Maximum number of ticks to predict on the client from the last known move obtained from the server.\n\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
 
    Con::addVariable("$player::maxImpulseVelocity", TypeF32, &sMaxImpulseVelocity, 
       "@brief The maximum velocity allowed due to a single impulse.\n\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
 
    // Move triggers
    Con::addVariable("$player::jumpTrigger", TypeS32, &sJumpTrigger, 
       "@brief The move trigger index used for player jumping.\n\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
    Con::addVariable("$player::crouchTrigger", TypeS32, &sCrouchTrigger, 
       "@brief The move trigger index used for player crouching.\n\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
    Con::addVariable("$player::proneTrigger", TypeS32, &sProneTrigger, 
       "@brief The move trigger index used for player prone pose.\n\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
    Con::addVariable("$player::sprintTrigger", TypeS32, &sSprintTrigger, 
       "@brief The move trigger index used for player sprinting.\n\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
    Con::addVariable("$player::imageTrigger0", TypeS32, &sImageTrigger0, 
       "@brief The move trigger index used to trigger mounted image 0.\n\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
    Con::addVariable("$player::imageTrigger1", TypeS32, &sImageTrigger1, 
       "@brief The move trigger index used to trigger mounted image 1 or alternate fire "
       "on mounted image 0.\n\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
    Con::addVariable("$player::jumpJetTrigger", TypeS32, &sJumpJetTrigger, 
       "@brief The move trigger index used for player jump jetting.\n\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
    Con::addVariable("$player::vehicleDismountTrigger", TypeS32, &sVehicleDismountTrigger, 
       "@brief The move trigger index used to dismount player.\n\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
 
    // ExtendedMove support
    Con::addVariable("$player::extendedMoveHeadPosRotIndex", TypeS32, &smExtendedMoveHeadPosRotIndex, 
       "@brief The ExtendedMove position/rotation index used for head movements.\n\n"
-	   "@ingroup GameObjects\n");
+      "@ingroup GameObjects\n");
 }
 
 //--------------------------------------------------------------------------

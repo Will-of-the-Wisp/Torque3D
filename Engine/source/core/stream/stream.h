@@ -41,10 +41,11 @@
 /// @}
 
 class ColorI;
-class ColorF;
+class LinearColorF;
 struct NetAddress;
 class RawData;
 class String;
+class NetSocket;
 
 namespace Torque {
    class ByteBuffer;
@@ -154,16 +155,21 @@ public:
    /// Write an integral color to the stream.
    bool write(const ColorI&);
    /// Write a floating point color to the stream.
-   bool write(const ColorF&);
+   bool write(const LinearColorF&);
    /// Read an integral color from the stream.
    bool read(ColorI*);
    /// Read a floating point color from the stream.
-   bool read(ColorF*);
+   bool read(LinearColorF*);
 
    /// Write a network address to the stream.
    bool write(const NetAddress &);
    /// Read a network address from the stream.
    bool read(NetAddress*);
+
+   /// Write a network socket to the stream.
+   bool write(const NetSocket &);
+   /// Read a network socket from the stream.
+   bool read(NetSocket*);
 
    /// Write some raw data onto the stream.
    bool write(const RawData &);

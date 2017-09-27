@@ -59,13 +59,14 @@ MODULE_END;
 
 GFX_ImplementTextureProfile( ReflectRenderTargetProfile, 
                              GFXTextureProfile::DiffuseMap, 
-                             GFXTextureProfile::PreserveSize | GFXTextureProfile::RenderTarget | GFXTextureProfile::Pooled, 
+                             GFXTextureProfile::PreserveSize | GFXTextureProfile::RenderTarget | GFXTextureProfile::SRGB | GFXTextureProfile::Pooled,
                              GFXTextureProfile::NONE );
 
 GFX_ImplementTextureProfile( RefractTextureProfile,
                              GFXTextureProfile::DiffuseMap,
                              GFXTextureProfile::PreserveSize | 
                              GFXTextureProfile::RenderTarget |
+                             GFXTextureProfile::SRGB | 
                              GFXTextureProfile::Pooled,
                              GFXTextureProfile::NONE );
 
@@ -83,8 +84,8 @@ U32 ReflectionManager::smFrameReflectionMS = 10;
 F32 ReflectionManager::smRefractTexScale = 0.5f;
 
 ReflectionManager::ReflectionManager() 
- : mUpdateRefract( true ),
-   mReflectFormat( GFXFormatR8G8B8A8 ),
+ : mReflectFormat( GFXFormatR8G8B8A8_SRGB ),
+   mUpdateRefract( true ),
    mLastUpdateMs( 0 )
 {
    mTimer = PlatformTimer::create();
@@ -149,13 +150,9 @@ void ReflectionManager::update(  F32 timeSlice,
       // Calculate an ideal culling size here, we'll just assume double fov based on the first fovport based on 
       // the head position.
       FovPort port = query.fovPort[0];
-      F32 leftSize = query.nearPlane * port.leftTan;
-      F32 rightSize = query.nearPlane * port.rightTan;
       F32 upSize = query.nearPlane * port.upTan;
       F32 downSize = query.nearPlane * port.downTan;
 
-      F32 left = -leftSize;
-      F32 right = rightSize;
       F32 top = upSize;
       F32 bottom = -downSize;
 
@@ -212,7 +209,6 @@ void ReflectionManager::update(  F32 timeSlice,
    mTimer->getElapsedMs();
    mTimer->reset();
    U32 numUpdated = 0;
-   U32 currentTarget = stereoTarget >= 0 ? stereoTarget : 0;
    reflectorIter = mReflectors.begin();
    for ( ; reflectorIter != mReflectors.end(); reflectorIter++ )
    {      
@@ -287,25 +283,10 @@ GFXTextureObject* ReflectionManager::getRefractTex( bool forceUpdate )
    GFXFormat targetFormat = target->getFormat();
    const Point2I &targetSize = target->getSize();
 
-#if defined(TORQUE_OS_XENON)
-   // On the Xbox360, it needs to do a resolveTo from the active target, so this
-   // may as well be the full size of the active target
-   const U32 desWidth = targetSize.x;
-   const U32 desHeight = targetSize.y;
-#else
-   U32 desWidth, desHeight;
    // D3D11 needs to be the same size as the active target
-   if (GFX->getAdapterType() == Direct3D11)
-   {
-      desWidth = targetSize.x;
-      desHeight = targetSize.y;
-   }
-   else
-   {
-      desWidth = mFloor((F32)targetSize.x * smRefractTexScale);
-      desHeight = mFloor((F32)targetSize.y * smRefractTexScale);
-   }
-#endif
+   U32 desWidth = targetSize.x;
+   U32 desHeight = targetSize.y;
+
 
    if ( mRefractTex.isNull() || 
         mRefractTex->getWidth() != desWidth ||

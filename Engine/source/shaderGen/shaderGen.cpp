@@ -49,6 +49,7 @@ MODULE_BEGIN( ShaderGen )
 
 MODULE_END;
 
+String ShaderGen::smCommonShaderPath("shaders/common");
 
 ShaderGen::ShaderGen()
 {
@@ -95,18 +96,13 @@ void ShaderGen::initShaderGen()
    if (!mInitDelegates[adapterType])
       return;
 
+   smCommonShaderPath = String(Con::getVariable("$Core::CommonShaderPath", "shaders/common"));
+
    mInitDelegates[adapterType](this);
    mFeatureInitSignal.trigger( adapterType );
    mInit = true;
 
    String shaderPath = Con::getVariable( "$shaderGen::cachePath");
-#if defined(TORQUE_SHADERGEN) && ( defined(TORQUE_OS_XENON) || defined(TORQUE_OS_PS3) )
-   // If this is a console build, and TORQUE_SHADERGEN is defined 
-   // (signifying that new shaders should be generated) then clear the shader
-   // path so that the MemFileSystem is used instead.
-   shaderPath.clear();
-#endif
-
    if (!shaderPath.equal( "shadergen:" ) && !shaderPath.isEmpty() )
    {
       // this is necessary, especially under Windows with UAC enabled
@@ -468,12 +464,11 @@ GFXShader* ShaderGen::getShader( const MaterialFeatureData &featureData, const G
    // Don't get paranoid!  This has 1 in 18446744073709551616
    // chance for collision... it won't happen in this lifetime.
    //
-   U32 hash = Torque::hash( (const U8*)shaderDescription.c_str(), shaderDescription.length(), 0 );
+   U64 hash = Torque::hash64( (const U8*)shaderDescription.c_str(), shaderDescription.length(), 0 );
    hash = convertHostToLEndian(hash);
-   //U32 high = (U32)( hash >> 32 );
-   //U32 low = (U32)( hash & 0x00000000FFFFFFFF );
-   //String cacheKey = String::ToString( "%x%x", high, low );
-   String cacheKey = String::ToString("%x", hash);
+   U32 high = (U32)( hash >> 32 );
+   U32 low = (U32)( hash & 0x00000000FFFFFFFF );
+   String cacheKey = String::ToString( "%x%x", high, low );
    // return shader if exists
    GFXShader *match = mProcShaders[cacheKey];
    if ( match )

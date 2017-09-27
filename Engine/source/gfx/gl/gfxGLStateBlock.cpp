@@ -40,32 +40,38 @@ GFXGLStateBlock::GFXGLStateBlock(const GFXStateBlockDesc& desc) :
    mCachedHashValue(desc.getHashValue())
 {
     if( !GFXGL->mCapabilities.samplerObjects )
-	   return;
+      return;
 
    static Map<GFXSamplerStateDesc, U32> mSamplersMap;
 
-	for(int i = 0; i < TEXTURE_STAGE_COUNT; ++i)
-	{
-		GLuint &id = mSamplerObjects[i];
-		GFXSamplerStateDesc &ssd = mDesc.samplers[i];
+   for(int i = 0; i < TEXTURE_STAGE_COUNT; ++i)
+   {
+      GLuint &id = mSamplerObjects[i];
+      GFXSamplerStateDesc &ssd = mDesc.samplers[i];
       Map<GFXSamplerStateDesc, U32>::Iterator itr =  mSamplersMap.find(ssd);
       if(itr == mSamplersMap.end())
       {
-		   glGenSamplers(1, &id);
+         glGenSamplers(1, &id);
 
-		   glSamplerParameteri(id, GL_TEXTURE_MIN_FILTER, minificationFilter(ssd.minFilter, ssd.mipFilter, 1) );
-		   glSamplerParameteri(id, GL_TEXTURE_MAG_FILTER, GFXGLTextureFilter[ssd.magFilter]);
-		   glSamplerParameteri(id, GL_TEXTURE_WRAP_S, GFXGLTextureAddress[ssd.addressModeU]);
-		   glSamplerParameteri(id, GL_TEXTURE_WRAP_T, GFXGLTextureAddress[ssd.addressModeV]);
-		   glSamplerParameteri(id, GL_TEXTURE_WRAP_R, GFXGLTextureAddress[ssd.addressModeW]);
-		   if(static_cast< GFXGLDevice* >( GFX )->supportsAnisotropic() )
-			   glSamplerParameterf(id, GL_TEXTURE_MAX_ANISOTROPY_EXT, ssd.maxAnisotropy);
+         glSamplerParameteri(id, GL_TEXTURE_MIN_FILTER, minificationFilter(ssd.minFilter, ssd.mipFilter, 1) );
+         glSamplerParameteri(id, GL_TEXTURE_MAG_FILTER, GFXGLTextureFilter[ssd.magFilter]);
+         glSamplerParameteri(id, GL_TEXTURE_WRAP_S, GFXGLTextureAddress[ssd.addressModeU]);
+         glSamplerParameteri(id, GL_TEXTURE_WRAP_T, GFXGLTextureAddress[ssd.addressModeV]);
+         glSamplerParameteri(id, GL_TEXTURE_WRAP_R, GFXGLTextureAddress[ssd.addressModeW]);
+         
+         //compare modes
+         const bool comparison = ssd.samplerFunc != GFXCmpNever;
+         glSamplerParameteri(id, GL_TEXTURE_COMPARE_MODE, comparison ? GL_COMPARE_R_TO_TEXTURE_ARB : GL_NONE );
+         glSamplerParameteri(id, GL_TEXTURE_COMPARE_FUNC, GFXGLCmpFunc[ssd.samplerFunc]);
+
+         if (static_cast< GFXGLDevice* >(GFX)->supportsAnisotropic())
+            glSamplerParameterf(id, GL_TEXTURE_MAX_ANISOTROPY_EXT, ssd.maxAnisotropy);
 
          mSamplersMap[ssd] = id;
       }
       else
          id = itr->value;
-	}
+   }
 }
 
 GFXGLStateBlock::~GFXGLStateBlock()
@@ -133,16 +139,19 @@ void GFXGLStateBlock::activate(const GFXGLStateBlock* oldState)
    if(STATE_CHANGE(zFunc))
       glDepthFunc(GFXGLCmpFunc[mDesc.zFunc]);
    
-   if(STATE_CHANGE(zBias))
+   if (STATE_CHANGE(zBias))
    {
       if (mDesc.zBias == 0)
       {
          glDisable(GL_POLYGON_OFFSET_FILL);
-      } else {
-         F32 bias = mDesc.zBias * 10000.0f;
+      }
+      else 
+      {
+         //this assumes 24bit depth
+         const F32 depthMul = F32((1 << 24) - 1);
          glEnable(GL_POLYGON_OFFSET_FILL);
-         glPolygonOffset(bias, bias);
-      } 
+         glPolygonOffset(mDesc.zSlopeBias, mDesc.zBias * depthMul);
+      }
    }
    
    if(STATE_CHANGE(zWriteEnable))
@@ -171,9 +180,9 @@ void GFXGLStateBlock::activate(const GFXGLStateBlock* oldState)
       for (U32 i = 0; i < getMin(getOwningDevice()->getNumSamplers(), (U32) TEXTURE_STAGE_COUNT); i++)
       {
          if(!oldState || oldState->mSamplerObjects[i] != mSamplerObjects[i])
-		      glBindSampler(i, mSamplerObjects[i] );
+            glBindSampler(i, mSamplerObjects[i] );
       }
-   }	  
+   }    
 
    // TODO: states added for detail blend   
 }

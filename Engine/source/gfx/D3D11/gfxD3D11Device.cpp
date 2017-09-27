@@ -37,6 +37,7 @@
 #include "windowManager/platformWindow.h"
 #include "gfx/D3D11/screenshotD3D11.h"
 #include "materials/shaderData.h"
+#include "shaderGen/shaderGen.h"
 
 #ifdef TORQUE_DEBUG
 #include "d3d11sdklayers.h"
@@ -45,12 +46,147 @@
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3d11.lib")
 
+class GFXPCD3D11RegisterDevice
+{
+public:
+   GFXPCD3D11RegisterDevice()
+   {
+      GFXInit::getRegisterDeviceSignal().notify(&GFXD3D11Device::enumerateAdapters);
+   }
+};
+
+static GFXPCD3D11RegisterDevice pPCD3D11RegisterDevice;
+
+//-----------------------------------------------------------------------------
+/// Parse command line arguments for window creation
+//-----------------------------------------------------------------------------
+static void sgPCD3D11DeviceHandleCommandLine(S32 argc, const char **argv)
+{
+   // useful to pass parameters by command line for d3d (e.g. -dx9 -dx11)
+   for (U32 i = 1; i < argc; i++)
+   {
+      argv[i];
+   }
+}
+
+// Register the command line parsing hook
+static ProcessRegisterCommandLine sgCommandLine(sgPCD3D11DeviceHandleCommandLine);
+
 GFXAdapter::CreateDeviceInstanceDelegate GFXD3D11Device::mCreateDeviceInstance(GFXD3D11Device::createInstance);
 
 GFXDevice *GFXD3D11Device::createInstance(U32 adapterIndex)
 {
    GFXD3D11Device* dev = new GFXD3D11Device(adapterIndex);
    return dev;
+}
+
+GFXD3D11Device::GFXD3D11Device(U32 index)
+{
+   mDeviceSwizzle32 = &Swizzles::bgra;
+   GFXVertexColor::setSwizzle(mDeviceSwizzle32);
+
+   mDeviceSwizzle24 = &Swizzles::bgr;
+
+   mAdapterIndex = index;
+   mD3DDevice = NULL;
+   mD3DDeviceContext = NULL;
+   mD3DDevice1 = NULL;
+   mD3DDeviceContext1 = NULL;
+   mUserAnnotation = NULL;
+   mVolatileVB = NULL;
+
+   mCurrentPB = NULL;
+   mDynamicPB = NULL;
+
+   mLastVertShader = NULL;
+   mLastPixShader = NULL;
+
+   mCanCurrentlyRender = false;
+   mTextureManager = NULL;
+   mCurrentStateBlock = NULL;
+   mResourceListHead = NULL;
+
+   mPixVersion = 0.0;
+
+   mVertexShaderTarget = String::EmptyString;
+   mPixelShaderTarget = String::EmptyString;
+   mShaderModel = String::EmptyString;
+
+   mDrawInstancesCount = 0;
+
+   mCardProfiler = NULL;
+
+   mDeviceDepthStencil = NULL;
+   mDeviceBackbuffer = NULL;
+   mDeviceBackBufferView = NULL;
+   mDeviceDepthStencilView = NULL;
+
+   mCreateFenceType = -1; // Unknown, test on first allocate
+
+   mCurrentConstBuffer = NULL;
+
+   mOcclusionQuerySupported = false;
+   mCbufferPartialSupported = false;
+
+   mDebugLayers = false;
+
+   for (U32 i = 0; i < GS_COUNT; ++i)
+      mModelViewProjSC[i] = NULL;
+
+   // Set up the Enum translation tables
+   GFXD3D11EnumTranslate::init();
+}
+
+GFXD3D11Device::~GFXD3D11Device()
+{
+   // Release our refcount on the current stateblock object
+   mCurrentStateBlock = NULL;
+
+   releaseDefaultPoolResources();
+
+   mD3DDeviceContext->ClearState();
+   mD3DDeviceContext->Flush();
+
+   // Free the sampler states
+   SamplerMap::Iterator sampIter = mSamplersMap.begin();
+   for (; sampIter != mSamplersMap.end(); ++sampIter)
+      SAFE_RELEASE(sampIter->value);
+
+   // Free the vertex declarations.
+   VertexDeclMap::Iterator iter = mVertexDecls.begin();
+   for (; iter != mVertexDecls.end(); ++iter)
+      delete iter->value;
+
+   // Forcibly clean up the pools
+   mVolatileVBList.setSize(0);
+   mDynamicPB = NULL;
+
+   // And release our D3D resources.
+   SAFE_RELEASE(mDeviceDepthStencilView);
+   SAFE_RELEASE(mDeviceBackBufferView);
+   SAFE_RELEASE(mDeviceDepthStencil);
+   SAFE_RELEASE(mDeviceBackbuffer);
+   SAFE_RELEASE(mUserAnnotation);
+   SAFE_RELEASE(mD3DDeviceContext1);
+   SAFE_RELEASE(mD3DDeviceContext);
+
+   SAFE_DELETE(mCardProfiler);
+   SAFE_DELETE(gScreenShot);
+
+#ifdef TORQUE_DEBUG
+   if (mDebugLayers)
+   {
+      ID3D11Debug *pDebug = NULL;
+      mD3DDevice->QueryInterface(IID_PPV_ARGS(&pDebug));
+      AssertFatal(pDebug, "~GFXD3D11Device- Failed to get debug layer");
+      pDebug->ReportLiveDeviceObjects(D3D11_RLDO_DETAIL);
+      SAFE_RELEASE(pDebug);
+   }
+#endif
+
+   SAFE_RELEASE(mSwapChain);
+   SAFE_RELEASE(mD3DDevice1);
+   SAFE_RELEASE(mD3DDevice);
 }
 
 GFXFormat GFXD3D11Device::selectSupportedFormat(GFXTextureProfile *profile, const Vector<GFXFormat> &formats, bool texture, bool mustblend, bool mustfilter)
@@ -91,7 +227,7 @@ DXGI_SWAP_CHAIN_DESC GFXD3D11Device::setupPresentParams(const GFXVideoMode &mode
    d3dpp.BufferCount = !smDisableVSync ? 2 : 1; // triple buffering when vsync is on.
    d3dpp.BufferDesc.Width = mode.resolution.x;
    d3dpp.BufferDesc.Height = mode.resolution.y;
-   d3dpp.BufferDesc.Format = GFXD3D11TextureFormat[GFXFormatR8G8B8A8];
+   d3dpp.BufferDesc.Format = GFXD3D11TextureFormat[GFXFormatR8G8B8A8_SRGB];
    d3dpp.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
    d3dpp.OutputWindow = hwnd;
    d3dpp.SampleDesc = sampleDesc;
@@ -158,7 +294,7 @@ void GFXD3D11Device::enumerateAdapters(Vector<GFXAdapter*> &adapterList)
 
       UINT numModes = 0;
       DXGI_MODE_DESC* displayModes = NULL;
-      DXGI_FORMAT format = DXGI_FORMAT_B8G8R8A8_UNORM;
+      DXGI_FORMAT format = GFXD3D11TextureFormat[GFXFormatR8G8B8A8_SRGB];
 
       // Get the number of elements
       hr = pOutput->GetDisplayModeList(format, 0, &numModes, NULL);
@@ -186,10 +322,47 @@ void GFXD3D11Device::enumerateAdapters(Vector<GFXAdapter*> &adapterList)
          toAdd->mAvailableModes.push_back(vmAdd);
       }
 
+      //Check adapater can handle feature level 10
+      D3D_FEATURE_LEVEL deviceFeature;
+      ID3D11Device *pTmpDevice = nullptr;
+      // Create temp Direct3D11 device.
+      bool suitable = true;
+      UINT createDeviceFlags = D3D11_CREATE_DEVICE_SINGLETHREADED | D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+      hr = D3D11CreateDevice(EnumAdapter, D3D_DRIVER_TYPE_UNKNOWN, NULL, createDeviceFlags, NULL, 0, D3D11_SDK_VERSION, &pTmpDevice, &deviceFeature, NULL);
+
+      if (FAILED(hr))
+         suitable = false;
+
+      if (deviceFeature < D3D_FEATURE_LEVEL_10_0)
+         suitable = false;
+
+      //double check we support required bgra format for LEVEL_10_0 & LEVEL_10_1
+      if (deviceFeature == D3D_FEATURE_LEVEL_10_0 || deviceFeature == D3D_FEATURE_LEVEL_10_1)
+      {
+         U32 formatSupported = 0;
+         pTmpDevice->CheckFormatSupport(DXGI_FORMAT_B8G8R8A8_UNORM, &formatSupported);
+         U32 flagsRequired = D3D11_FORMAT_SUPPORT_RENDER_TARGET | D3D11_FORMAT_SUPPORT_DISPLAY;
+         if (!(formatSupported && flagsRequired))
+         {
+            Con::printf("DXGI adapter: %s does not support BGRA", Description.c_str());
+            suitable = false;
+         }
+      }
+
       delete[] displayModes;
+      SAFE_RELEASE(pTmpDevice);
       SAFE_RELEASE(pOutput);
       SAFE_RELEASE(EnumAdapter);
-      adapterList.push_back(toAdd);
+
+      if (suitable)
+      {
+         adapterList.push_back(toAdd);
+      }
+      else
+      {
+         Con::printf("DXGI adapter: %s does not support D3D11 feature level 10 or better", Description.c_str());
+         delete toAdd;
+      }
    }
 
    SAFE_RELEASE(DXGIFactory);
@@ -225,7 +398,7 @@ void GFXD3D11Device::enumerateVideoModes()
 
       UINT numModes = 0;
       DXGI_MODE_DESC* displayModes = NULL;
-      DXGI_FORMAT format = GFXD3D11TextureFormat[GFXFormatR8G8B8A8];
+      DXGI_FORMAT format = GFXD3D11TextureFormat[GFXFormatR8G8B8A8_SRGB];
 
       // Get the number of elements
       hr = pOutput->GetDisplayModeList(format, 0, &numModes, NULL);
@@ -261,11 +434,6 @@ void GFXD3D11Device::enumerateVideoModes()
    SAFE_RELEASE(DXGIFactory);
 }
 
-IDXGISwapChain* GFXD3D11Device::getSwapChain()
-{
-   return mSwapChain;
-}
-
 void GFXD3D11Device::init(const GFXVideoMode &mode, PlatformWindow *window)
 {
    AssertFatal(window, "GFXD3D11Device::init - must specify a window!");
@@ -280,20 +448,22 @@ void GFXD3D11Device::init(const GFXVideoMode &mode, PlatformWindow *window)
 
    DXGI_SWAP_CHAIN_DESC d3dpp = setupPresentParams(mode, winHwnd);
 
-   D3D_FEATURE_LEVEL deviceFeature;
+   // TODO support at least feature level 10 to match GL
+   D3D_FEATURE_LEVEL pFeatureLevels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0 };
+   U32 nFeatureCount = ARRAYSIZE(pFeatureLevels);
    D3D_DRIVER_TYPE driverType = D3D_DRIVER_TYPE_HARDWARE;// use D3D_DRIVER_TYPE_REFERENCE for reference device
    // create a device, device context and swap chain using the information in the d3dpp struct
    HRESULT hres = D3D11CreateDeviceAndSwapChain(NULL,
                                  driverType,
                                  NULL,
                                  createDeviceFlags,
-                                 NULL,
-                                 0,
+											pFeatureLevels,
+                                 nFeatureCount,
                                  D3D11_SDK_VERSION,
                                  &d3dpp,
                                  &mSwapChain,
                                  &mD3DDevice,
-                                 &deviceFeature,
+                                 &mFeatureLevel,
                                  &mD3DDeviceContext);
 
    if(FAILED(hres))
@@ -301,12 +471,12 @@ void GFXD3D11Device::init(const GFXVideoMode &mode, PlatformWindow *window)
       #ifdef TORQUE_DEBUG
       //try again without debug device layer enabled
       createDeviceFlags &= ~D3D11_CREATE_DEVICE_DEBUG;
-      HRESULT hres = D3D11CreateDeviceAndSwapChain(NULL, driverType,NULL,createDeviceFlags,NULL, 0,
+      hres = D3D11CreateDeviceAndSwapChain(NULL, driverType,NULL,createDeviceFlags,NULL, 0,
          D3D11_SDK_VERSION,
          &d3dpp,
          &mSwapChain,
          &mD3DDevice,
-         &deviceFeature,
+         &mFeatureLevel,
          &mD3DDeviceContext);
       //if we failed again than we definitely have a problem
       if (FAILED(hres))
@@ -318,6 +488,26 @@ void GFXD3D11Device::init(const GFXVideoMode &mode, PlatformWindow *window)
       AssertFatal(false, "GFXD3D11Device::init - D3D11CreateDeviceAndSwapChain failed!");
       #endif
    }
+
+   // Grab DX 11.1 device and context if available and also ID3DUserDefinedAnnotation
+   hres = mD3DDevice->QueryInterface(__uuidof(ID3D11Device1), reinterpret_cast<void**>(&mD3DDevice1));
+   if (SUCCEEDED(hres))
+   {
+      //11.1 context
+      mD3DDeviceContext->QueryInterface(__uuidof(ID3D11DeviceContext1), reinterpret_cast<void**>(&mD3DDeviceContext1));
+      // ID3DUserDefinedAnnotation
+      mD3DDeviceContext->QueryInterface(IID_PPV_ARGS(&mUserAnnotation));
+      //Check what is supported, windows 7 supports very little from 11.1
+      D3D11_FEATURE_DATA_D3D11_OPTIONS options;
+      mD3DDevice1->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS, &options,
+         sizeof(D3D11_FEATURE_DATA_D3D11_OPTIONS));
+
+      //Cbuffer partial updates
+      if (options.ConstantBufferOffsetting && options.ConstantBufferPartialUpdate)
+         mCbufferPartialSupported = true;
+   }
+
+
 
    //set the fullscreen state here if we need to
    if(mode.fullScreen)
@@ -333,11 +523,31 @@ void GFXD3D11Device::init(const GFXVideoMode &mode, PlatformWindow *window)
 
    // Now reacquire all the resources we trashed earlier
    reacquireDefaultPoolResources();
-   //TODO implement feature levels?
-   if (deviceFeature >= D3D_FEATURE_LEVEL_11_0)
+   //set vert/pixel shader targets
+   switch (mFeatureLevel)
+   {
+   case D3D_FEATURE_LEVEL_11_1:
+   case D3D_FEATURE_LEVEL_11_0:
+      mVertexShaderTarget = "vs_5_0";
+      mPixelShaderTarget = "ps_5_0";
       mPixVersion = 5.0f;
-   else
-      AssertFatal(false, "GFXD3D11Device::init - We don't support anything below feature level 11.");
+      mShaderModel = "50";
+      break;
+   case D3D_FEATURE_LEVEL_10_1:
+      mVertexShaderTarget = "vs_4_1";
+      mPixelShaderTarget = "ps_4_1";
+      mPixVersion = 4.1f;
+      mShaderModel = "41";
+      break;
+   case D3D_FEATURE_LEVEL_10_0:
+      mVertexShaderTarget = "vs_4_0";
+      mPixelShaderTarget = "ps_4_0";
+      mPixVersion = 4.0f;
+      mShaderModel = "40";
+      break;
+   default:
+      AssertFatal(false, "GFXD3D11Device::init - We don't support this feature level");
+   }
 
    D3D11_QUERY_DESC queryDesc;
    queryDesc.Query = D3D11_QUERY_OCCLUSION;
@@ -394,7 +604,7 @@ void GFXD3D11Device::init(const GFXVideoMode &mode, PlatformWindow *window)
    //create back buffer view
    D3D11_RENDER_TARGET_VIEW_DESC RTDesc;
 
-   RTDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+   RTDesc.Format = GFXD3D11TextureFormat[GFXFormatR8G8B8A8_SRGB];
    RTDesc.Texture2D.MipSlice = 0;
    RTDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 
@@ -579,7 +789,7 @@ void GFXD3D11Device::reset(DXGI_SWAP_CHAIN_DESC &d3dpp)
    //create back buffer view
    D3D11_RENDER_TARGET_VIEW_DESC RTDesc;
 
-   RTDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+   RTDesc.Format = GFXD3D11TextureFormat[GFXFormatR8G8B8A8_SRGB];
    RTDesc.Texture2D.MipSlice = 0;
    RTDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 
@@ -614,127 +824,11 @@ void GFXD3D11Device::reset(DXGI_SWAP_CHAIN_DESC &d3dpp)
 
    // Now re aquire all the resources we trashed earlier
    reacquireDefaultPoolResources();
-
+   //set last bound shaders
+   mD3DDeviceContext->PSSetShader(mLastPixShader, NULL, 0);
+   mD3DDeviceContext->VSSetShader(mLastVertShader, NULL, 0);
    // Mark everything dirty and flush to card, for sanity.
    updateStates(true);
-}
-
-class GFXPCD3D11RegisterDevice
-{
-public:
-   GFXPCD3D11RegisterDevice()
-   {
-      GFXInit::getRegisterDeviceSignal().notify(&GFXD3D11Device::enumerateAdapters);
-   }
-};
-
-static GFXPCD3D11RegisterDevice pPCD3D11RegisterDevice;
-
-//-----------------------------------------------------------------------------
-/// Parse command line arguments for window creation
-//-----------------------------------------------------------------------------
-static void sgPCD3D11DeviceHandleCommandLine(S32 argc, const char **argv)
-{
-   // useful to pass parameters by command line for d3d (e.g. -dx9 -dx11)
-   for (U32 i = 1; i < argc; i++)
-   {
-      argv[i];
-   }   
-}
-
-// Register the command line parsing hook
-static ProcessRegisterCommandLine sgCommandLine( sgPCD3D11DeviceHandleCommandLine );
-
-GFXD3D11Device::GFXD3D11Device(U32 index)
-{
-   mDeviceSwizzle32 = &Swizzles::bgra;
-   GFXVertexColor::setSwizzle( mDeviceSwizzle32 );
-
-   mDeviceSwizzle24 = &Swizzles::bgr;
-
-   mAdapterIndex = index;
-   mD3DDevice = NULL;
-   mVolatileVB = NULL;
-
-   mCurrentPB = NULL;
-   mDynamicPB = NULL;
-
-   mLastVertShader = NULL;
-   mLastPixShader = NULL;
-
-   mCanCurrentlyRender = false;
-   mTextureManager = NULL;
-   mCurrentStateBlock = NULL;
-   mResourceListHead = NULL;
-
-   mPixVersion = 0.0;
-
-   mDrawInstancesCount = 0;
-
-   mCardProfiler = NULL;
-
-   mDeviceDepthStencil = NULL;
-   mDeviceBackbuffer = NULL;
-   mDeviceBackBufferView = NULL;
-   mDeviceDepthStencilView = NULL;
-
-   mCreateFenceType = -1; // Unknown, test on first allocate
-
-   mCurrentConstBuffer = NULL;
-
-   mOcclusionQuerySupported = false;
-
-   mDebugLayers = false;
-
-   for(U32 i = 0; i < GS_COUNT; ++i)
-      mModelViewProjSC[i] = NULL;
-
-   // Set up the Enum translation tables
-   GFXD3D11EnumTranslate::init();
-}
-
-GFXD3D11Device::~GFXD3D11Device() 
-{
-   // Release our refcount on the current stateblock object
-   mCurrentStateBlock = NULL;
-
-   releaseDefaultPoolResources();
-
-   mD3DDeviceContext->ClearState();
-   mD3DDeviceContext->Flush();
-
-   // Free the vertex declarations.
-   VertexDeclMap::Iterator iter = mVertexDecls.begin();
-   for ( ; iter != mVertexDecls.end(); iter++ )
-      delete iter->value;
-
-   // Forcibly clean up the pools
-   mVolatileVBList.setSize(0);
-   mDynamicPB = NULL;
-
-   // And release our D3D resources.
-   SAFE_RELEASE(mDeviceDepthStencilView);
-   SAFE_RELEASE(mDeviceBackBufferView);
-   SAFE_RELEASE(mDeviceDepthStencil);
-   SAFE_RELEASE(mDeviceBackbuffer);
-   SAFE_RELEASE(mD3DDeviceContext);
-
-   SAFE_DELETE(mCardProfiler);
-   SAFE_DELETE(gScreenShot);
-
-#ifdef TORQUE_DEBUG
-   if (mDebugLayers)
-   {
-      ID3D11Debug *pDebug = NULL;
-      mD3DDevice->QueryInterface(IID_PPV_ARGS(&pDebug));
-      AssertFatal(pDebug, "~GFXD3D11Device- Failed to get debug layer");
-      pDebug->ReportLiveDeviceObjects(D3D11_RLDO_DETAIL);
-      SAFE_RELEASE(pDebug);
-   }
-#endif
-   
-   SAFE_RELEASE(mSwapChain);
-   SAFE_RELEASE(mD3DDevice);
 }
 
 void GFXD3D11Device::setupGenericShaders(GenericShaderType type)
@@ -744,11 +838,12 @@ void GFXD3D11Device::setupGenericShaders(GenericShaderType type)
    if(mGenericShader[GSColor] == NULL)
    {
       ShaderData *shaderData;
-
+      //shader model 4.0 is enough for the generic shaders
+      const char* shaderModel = "4.0";
       shaderData = new ShaderData();
-      shaderData->setField("DXVertexShaderFile", "shaders/common/fixedFunction/colorV.hlsl");
-      shaderData->setField("DXPixelShaderFile", "shaders/common/fixedFunction/colorP.hlsl");
-      shaderData->setField("pixVersion", "5.0");
+      shaderData->setField("DXVertexShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/colorV.hlsl"));
+      shaderData->setField("DXPixelShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/colorP.hlsl"));
+      shaderData->setField("pixVersion", shaderModel);
       shaderData->registerObject();
       mGenericShader[GSColor] =  shaderData->getShader();
       mGenericShaderBuffer[GSColor] = mGenericShader[GSColor]->allocConstBuffer();
@@ -756,9 +851,9 @@ void GFXD3D11Device::setupGenericShaders(GenericShaderType type)
       Sim::getRootGroup()->addObject(shaderData);
 
       shaderData = new ShaderData();
-      shaderData->setField("DXVertexShaderFile", "shaders/common/fixedFunction/modColorTextureV.hlsl");
-      shaderData->setField("DXPixelShaderFile", "shaders/common/fixedFunction/modColorTextureP.hlsl");
-      shaderData->setField("pixVersion", "5.0");
+      shaderData->setField("DXVertexShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/modColorTextureV.hlsl"));
+      shaderData->setField("DXPixelShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/modColorTextureP.hlsl"));
+      shaderData->setField("pixVersion", shaderModel);
       shaderData->registerObject();
       mGenericShader[GSModColorTexture] = shaderData->getShader();
       mGenericShaderBuffer[GSModColorTexture] = mGenericShader[GSModColorTexture]->allocConstBuffer();
@@ -766,9 +861,9 @@ void GFXD3D11Device::setupGenericShaders(GenericShaderType type)
       Sim::getRootGroup()->addObject(shaderData);
 
       shaderData = new ShaderData();
-      shaderData->setField("DXVertexShaderFile", "shaders/common/fixedFunction/addColorTextureV.hlsl");
-      shaderData->setField("DXPixelShaderFile", "shaders/common/fixedFunction/addColorTextureP.hlsl");
-      shaderData->setField("pixVersion", "5.0");
+      shaderData->setField("DXVertexShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/addColorTextureV.hlsl"));
+      shaderData->setField("DXPixelShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/addColorTextureP.hlsl"));
+      shaderData->setField("pixVersion", shaderModel);
       shaderData->registerObject();
       mGenericShader[GSAddColorTexture] = shaderData->getShader();
       mGenericShaderBuffer[GSAddColorTexture] = mGenericShader[GSAddColorTexture]->allocConstBuffer();
@@ -776,9 +871,9 @@ void GFXD3D11Device::setupGenericShaders(GenericShaderType type)
       Sim::getRootGroup()->addObject(shaderData);
 
       shaderData = new ShaderData();
-      shaderData->setField("DXVertexShaderFile", "shaders/common/fixedFunction/textureV.hlsl");
-      shaderData->setField("DXPixelShaderFile", "shaders/common/fixedFunction/textureP.hlsl");
-      shaderData->setField("pixVersion", "5.0");
+      shaderData->setField("DXVertexShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/textureV.hlsl"));
+      shaderData->setField("DXPixelShaderFile", ShaderGen::smCommonShaderPath + String("/fixedFunction/textureP.hlsl"));
+      shaderData->setField("pixVersion", shaderModel);
       shaderData->registerObject();
       mGenericShader[GSTexture] = shaderData->getShader();
       mGenericShaderBuffer[GSTexture] = mGenericShader[GSTexture]->allocConstBuffer();
@@ -838,7 +933,7 @@ void GFXD3D11Device::setShaderConstBufferInternal(GFXShaderConstBuffer* buffer)
 
 //-----------------------------------------------------------------------------
 
-void GFXD3D11Device::clear(U32 flags, ColorI color, F32 z, U32 stencil)
+void GFXD3D11Device::clear(U32 flags, const LinearColorF& color, F32 z, U32 stencil)
 {
    // Make sure we have flushed our render target state.
    _updateRenderTargets();
@@ -850,12 +945,7 @@ void GFXD3D11Device::clear(U32 flags, ColorI color, F32 z, U32 stencil)
 
    mD3DDeviceContext->OMGetRenderTargets(1, &rtView, &dsView);
 
-   const FLOAT clearColor[4] = {
-      static_cast<F32>(color.red) * (1.0f / 255.0f),
-      static_cast<F32>(color.green) * (1.0f / 255.0f),
-      static_cast<F32>(color.blue) * (1.0f / 255.0f),
-      static_cast<F32>(color.alpha) * (1.0f / 255.0f)
-   };
+   const FLOAT clearColor[4] = { color.red, color.green, color.blue, color.alpha };
 
    if (flags & GFXClearTarget && rtView)
       mD3DDeviceContext->ClearRenderTargetView(rtView, clearColor);
@@ -1430,15 +1520,12 @@ String GFXD3D11Device::_createTempShaderInternal(const GFXVertexFormat *vertexFo
    //make shader
    mainBodyData.append("VertOut main(VertIn IN){VertOut OUT;");
 
-   bool addedPadding = false;
    for (U32 i = 0; i < elemCount; i++)
    {
       const GFXVertexElement &element = vertexFormat->getElement(i);
       String semantic = element.getSemantic();
       String semanticOut = semantic;
       String type;
-
-      AssertFatal(!(addedPadding && !element.isSemantic(GFXSemantic::PADDING)), "Padding added before data");
 
       if (element.isSemantic(GFXSemantic::POSITION))
       {
@@ -1474,11 +1561,6 @@ String GFXD3D11Device::_createTempShaderInternal(const GFXVertexFormat *vertexFo
       {
          semantic = String::ToString("BLENDWEIGHT%d", element.getSemanticIndex());
          semanticOut = semantic;
-      }
-      else if (element.isSemantic(GFXSemantic::PADDING))
-      {
-         addedPadding = true;
-         continue;
       }
       else
       {
@@ -1641,12 +1723,6 @@ GFXVertexDecl* GFXD3D11Device::allocVertexDecl( const GFXVertexFormat *vertexFor
          vd[i].SemanticName = "BLENDINDICES";
          vd[i].SemanticIndex = element.getSemanticIndex();
       }
-      else if (element.isSemantic(GFXSemantic::PADDING))
-      {
-         i--;
-         elemCount--;
-         continue;
-      }
       else
       {
           //Anything that falls thru to here will be a texture coord.
@@ -1759,4 +1835,34 @@ GFXCubemap * GFXD3D11Device::createCubemap()
    GFXD3D11Cubemap* cube = new GFXD3D11Cubemap();
    cube->registerResourceWithDevice(this);
    return cube;
+}
+
+// Debug events
+//------------------------------------------------------------------------------
+void GFXD3D11Device::enterDebugEvent(ColorI color, const char *name)
+{
+   if (mUserAnnotation)
+   {
+      WCHAR  eventName[260];
+      MultiByteToWideChar(CP_ACP, 0, name, -1, eventName, 260);
+      mUserAnnotation->BeginEvent(eventName);
+   }
+}
+
+//------------------------------------------------------------------------------
+void GFXD3D11Device::leaveDebugEvent()
+{
+   if (mUserAnnotation)
+      mUserAnnotation->EndEvent();
+}
+
+//------------------------------------------------------------------------------
+void GFXD3D11Device::setDebugMarker(ColorI color, const char *name)
+{
+   if (mUserAnnotation)
+   {
+      WCHAR  eventName[260];
+      MultiByteToWideChar(CP_ACP, 0, name, -1, eventName, 260);
+      mUserAnnotation->SetMarker(eventName);
+   }
 }

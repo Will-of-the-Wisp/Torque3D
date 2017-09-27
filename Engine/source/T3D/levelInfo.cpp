@@ -79,16 +79,16 @@ static SFXAmbience sDefaultAmbience;
 //-----------------------------------------------------------------------------
 
 LevelInfo::LevelInfo()
-   :  mNearClip( 0.1f ),
+   :  mWorldSize( 10000.0f ),
+      mNearClip( 0.1f ),
       mVisibleDistance( 1000.0f ),
       mVisibleGhostDistance ( 0 ),
       mDecalBias( 0.0015f ),
       mCanvasClearColor( 255, 0, 255, 255 ),
+      mAmbientLightBlendPhase( 1.f ),
       mSoundAmbience( NULL ),
-      mSoundscape( NULL ),
       mSoundDistanceModel( SFXDistanceModelLinear ),
-      mWorldSize( 10000.0f ),
-      mAmbientLightBlendPhase( 1.f )
+      mSoundscape( NULL )
 {
    mFogData.density = 0.0f;
    mFogData.densityOffset = 0.0f;
@@ -353,7 +353,7 @@ void LevelInfo::_onLMActivate(const char *lm, bool enable)
    {
       AssertFatal(dynamic_cast<AdvancedLightManager *>(LIGHTMGR), "Bad light manager type!");
       AdvancedLightManager *lightMgr = static_cast<AdvancedLightManager *>(LIGHTMGR);
-      lightMgr->getLightBinManager()->MRTLightmapsDuringPrePass(mAdvancedLightmapSupport);
+      lightMgr->getLightBinManager()->MRTLightmapsDuringDeferred(mAdvancedLightmapSupport);
    }
 #endif
 }
@@ -371,7 +371,7 @@ void LevelInfo::setLevelAccuTexture(const String& name)
    mAccuTextureName = name;
    if (isClientObject() && mAccuTextureName.isNotEmpty())
    {
-      mAccuTexture.set(mAccuTextureName, &GFXDefaultStaticDiffuseProfile, "AccumulationVolume::mAccuTexture");
+      mAccuTexture.set(mAccuTextureName, &GFXStaticTextureSRGBProfile, "AccumulationVolume::mAccuTexture");
       if (mAccuTexture.isNull())
          Con::warnf("AccumulationVolume::setTexture - Unable to load texture: %s", mAccuTextureName.c_str());
       else

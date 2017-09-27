@@ -242,7 +242,7 @@ void PhysicsShapeData::onRemove()
 
 void PhysicsShapeData::_onResourceChanged( const Torque::Path &path )
 {
-	if ( path != Path( shapeName ) )
+   if ( path != Path( shapeName ) )
       return;
 
    // Reload the changed shape.
@@ -257,9 +257,9 @@ void PhysicsShapeData::_onResourceChanged( const Torque::Path &path )
    }
 
    // Reload the collision shape.
-   reloadcolShape = shape->buildColShape( false, Point3F::One );
+   reloadcolShape = reloadShape->buildColShape( false, Point3F::One );
 
-   if ( bool(reloadShape) &&  bool(colShape))
+   if ( bool(reloadShape) &&  bool(reloadcolShape))
    {
       shape = reloadShape;
       colShape = reloadcolShape;
@@ -360,8 +360,8 @@ bool PhysicsShapeData::preload( bool server, String &errorBuffer )
       Vector<FConvexResult*> mHulls;
    };
 
- 	DecompDesc d;
-   d.mVcount       =	polyList.mVertexList.size();
+   DecompDesc d;
+   d.mVcount       = polyList.mVertexList.size();
    d.mVertices     = doubleVerts.address();
    d.mTcount       = polyList.mIndexList.size() / 3;
    d.mIndices      = polyList.mIndexList.address();
@@ -401,12 +401,12 @@ ConsoleDocClass( PhysicsShape,
 PhysicsShape::PhysicsShape()
    :  mPhysicsRep( NULL ),
       mWorld( NULL ),
-      mShapeInst( NULL ),
       mResetPos( MatrixF::Identity ),
+      mShapeInst( NULL ),
       mDestroyed( false ),
       mPlayAmbient( false ),
-      mAmbientThread( NULL ),
-      mAmbientSeq( -1 )
+      mAmbientSeq( -1 ),
+      mAmbientThread( NULL )
 {
    mNetFlags.set( Ghostable | ScopeAlways );
    mTypeMask |= DynamicShapeObjectType;
@@ -659,7 +659,7 @@ void PhysicsShape::onRemove()
       PhysicsPlugin::getPhysicsResetSignal().remove( this, &PhysicsShape::_onPhysicsReset );
 
       if ( mDestroyedShape )
-		  mDestroyedShape->deleteObject();
+        mDestroyedShape->deleteObject();
    }
 
    // Remove the resource change signal.
@@ -855,6 +855,18 @@ void PhysicsShape::applyImpulse( const Point3F &pos, const VectorF &vec )
 {
    if ( mPhysicsRep && mPhysicsRep->isDynamic() )
       mPhysicsRep->applyImpulse( pos, vec );
+}
+
+void PhysicsShape::applyTorque( const Point3F &torque )
+{
+   if (mPhysicsRep && mPhysicsRep->isDynamic())
+      mPhysicsRep->applyTorque( torque );
+}
+
+void PhysicsShape::applyForce( const Point3F &force )
+{
+   if (mPhysicsRep && mPhysicsRep->isDynamic())
+      mPhysicsRep->applyForce( force );
 }
 
 void PhysicsShape::applyRadialImpulse( const Point3F &origin, F32 radius, F32 magnitude )
@@ -1179,4 +1191,20 @@ DefineEngineMethod( PhysicsShape, restore, void, (),,
    "Has no effect if the shape is not destroyed.\n\n")
 {
    object->restore();
+}
+
+DefineEngineMethod( PhysicsShape, applyTorque, void, (Point3F torque), ,
+   "@brief Add a torque to a dynamic physics shape.\n\n"
+   "@param torque to apply to the dynamic physics shape\n"
+   "@note This value is ignored on physics shapes that are not dynamic. Wakes up the dynamic physics shape if it is sleeping.\n")
+{
+   object->applyTorque( torque );
+}
+
+DefineEngineMethod(PhysicsShape, applyForce, void, (Point3F force), ,
+   "@brief Add a force to a dynamic physics shape.\n\n"
+   "@param force to apply to the dynamic physics shape\n"
+   "@note This value is ignored on physics shapes that are not dynamic. Wakes up the dynamic physics shape if it is sleeping.\n")
+{
+   object->applyForce( force );
 }

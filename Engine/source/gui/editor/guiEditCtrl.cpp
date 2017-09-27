@@ -95,12 +95,12 @@ GuiEditCtrl::GuiEditCtrl()
      mDragBeginPoint( -1, -1 ),
      mSnapToControls( true ),
      mSnapToEdges( true ),
-     mSnapToCenters( true ),
      mSnapToGuides( true ),
+     mSnapToCenters( true ),
      mSnapToCanvas( true ),
-     mSnapSensitivity( 2 ),
-     mFullBoxSelection( false ),
      mDrawBorderLines( true ),
+     mFullBoxSelection( false ),
+     mSnapSensitivity( 2 ),
      mDrawGuides( true )
 {
    VECTOR_SET_ASSOCIATION( mSelectedControls );
@@ -716,16 +716,16 @@ void GuiEditCtrl::onRender(Point2I offset, const RectI &updateRect)
          ctOffset = getCurrentAddSet()->localToGlobalCoord(Point2I(0,0));
          RectI box(ctOffset.x, ctOffset.y, cext.x, cext.y);
 
-			box.inset( -5, -5 );
+         box.inset( -5, -5 );
          drawer->drawRect( box, ColorI( 50, 101, 152, 128 ) );
-			box.inset( 1, 1 );
+         box.inset( 1, 1 );
          drawer->drawRect( box, ColorI( 50, 101, 152, 128 ) );
-			box.inset( 1, 1 );
+         box.inset( 1, 1 );
          drawer->drawRect( box, ColorI( 50, 101, 152, 128 ) );
-			box.inset( 1, 1 );
+         box.inset( 1, 1 );
          drawer->drawRect( box, ColorI( 50, 101, 152, 128 ) );
-			box.inset( 1, 1 );
-			drawer->drawRect( box, ColorI( 50, 101, 152, 128 ) );
+         box.inset( 1, 1 );
+         drawer->drawRect( box, ColorI( 50, 101, 152, 128 ) );
       }
       Vector<GuiControl *>::iterator i;
       bool multisel = mSelectedControls.size() > 1;
@@ -848,7 +848,7 @@ void GuiEditCtrl::onRender(Point2I offset, const RectI &updateRect)
             if( mSnapTargets[ axis ] )
             {
                RectI bounds = mSnapTargets[ axis ]->getGlobalBounds();
-               drawer->drawRect( bounds, ColorF( .5, .5, .5, .5 ) );
+               drawer->drawRect( bounds, ColorI( 128, 128, 128, 128 ) );
             }
          }
       }
@@ -868,8 +868,8 @@ void GuiEditCtrl::drawNuts(RectI &box, ColorI &outlineColor, ColorI &nutColor)
 
    if( mDrawBorderLines )
    {
-      ColorF lineColor( 0.7f, 0.7f, 0.7f, 0.25f );
-      ColorF lightLineColor( 0.5f, 0.5f, 0.5f, 0.1f );
+      ColorI lineColor( 179, 179, 179, 64 );
+      ColorI lightLineColor( 128, 128, 128, 26);
       
       if(lx > 0 && ty > 0)
       {
@@ -2481,16 +2481,16 @@ DefineConsoleMethod( GuiEditCtrl, getContentControl, S32, (), , "() - Return the
 
 DefineConsoleMethod( GuiEditCtrl, setContentControl, void, (GuiControl *ctrl ), , "( GuiControl ctrl ) - Set the toplevel control to edit in the GUI editor." )
 {
-	if (ctrl)
-		object->setContentControl(ctrl);
+   if (ctrl)
+      object->setContentControl(ctrl);
 }
 
 //-----------------------------------------------------------------------------
 
 DefineConsoleMethod( GuiEditCtrl, addNewCtrl, void, (GuiControl *ctrl), , "(GuiControl ctrl)")
 {
-	if (ctrl)
-		object->addNewControl(ctrl);
+   if (ctrl)
+      object->addNewControl(ctrl);
 }
 
 //-----------------------------------------------------------------------------
@@ -2518,7 +2518,7 @@ DefineConsoleMethod( GuiEditCtrl, clearSelection, void, (), , "Clear selected co
 
 DefineConsoleMethod( GuiEditCtrl, select, void, (GuiControl *ctrl), , "(GuiControl ctrl)")
 {
-	if (ctrl)
+   if (ctrl)
    object->setSelection(ctrl, false);
 }
 
@@ -2526,7 +2526,7 @@ DefineConsoleMethod( GuiEditCtrl, select, void, (GuiControl *ctrl), , "(GuiContr
 
 DefineConsoleMethod( GuiEditCtrl, setCurrentAddSet, void, (GuiControl *addSet), , "(GuiControl ctrl)")
 {
-	if (addSet)
+   if (addSet)
    object->setCurrentAddSet(addSet);
 }
 
@@ -2582,7 +2582,7 @@ DefineConsoleMethod( GuiEditCtrl, moveSelection, void, (S32 dx, S32 dy), , "Move
 
 //-----------------------------------------------------------------------------
 
-DefineConsoleMethod( GuiEditCtrl, saveSelection, void, (const char * filename), (NULL), "( string fileName=null ) - Save selection to file or clipboard.")
+DefineConsoleMethod( GuiEditCtrl, saveSelection, void, (const char * filename), (nullAsType<const char*>()), "( string fileName=null ) - Save selection to file or clipboard.")
 {
       
    object->saveSelection( filename );
@@ -2590,7 +2590,7 @@ DefineConsoleMethod( GuiEditCtrl, saveSelection, void, (const char * filename), 
 
 //-----------------------------------------------------------------------------
 
-DefineConsoleMethod( GuiEditCtrl, loadSelection, void, (const char * filename), (NULL), "( string fileName=null ) - Load selection from file or clipboard.")
+DefineConsoleMethod( GuiEditCtrl, loadSelection, void, (const char * filename), (nullAsType<const char*>()), "( string fileName=null ) - Load selection from file or clipboard.")
 {
 
    object->loadSelection( filename );
@@ -2860,7 +2860,7 @@ class GuiEditorRuler : public GuiControl
       
       void onRender(Point2I offset, const RectI &updateRect)
       {
-         GFX->getDrawUtil()->drawRectFill(updateRect, ColorF(1,1,1,1));
+         GFX->getDrawUtil()->drawRectFill(updateRect, ColorI::WHITE);
          
          Point2I choffset(0,0);
          if( mRefCtrl != NULL )
@@ -2880,7 +2880,7 @@ class GuiEditorRuler : public GuiControl
                      start = 4;
                   if(!(pos % 100))
                      start = 1;
-                  GFX->getDrawUtil()->drawLine(x, offset.y + start, x, offset.y + 10, ColorF(0,0,0,1));
+                  GFX->getDrawUtil()->drawLine(x, offset.y + start, x, offset.y + 10, ColorI::BLACK);
                }
             }
          }
@@ -2898,7 +2898,7 @@ class GuiEditorRuler : public GuiControl
                      start = 4;
                   if(!(pos % 100))
                      start = 1;
-                  GFX->getDrawUtil()->drawLine(offset.x + start, y, offset.x + 10, y, ColorF(0,0,0,1));
+                  GFX->getDrawUtil()->drawLine(offset.x + start, y, offset.x + 10, y, ColorI::BLACK);
                }
             }
          }
